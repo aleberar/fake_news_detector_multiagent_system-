@@ -1,0 +1,753 @@
+# Task-uri Persoana 2
+## Proiect: Multi-Agent Fake News Detection using DistilBERT Features
+
+Rol principal:
+Persoana 2 se ocupă de:
+- Agentul 2: DistilBERT Feature Extraction Agent
+- Agentul 3: Fake News Classification Agent
+
+Scopul părții tale:
+Să transformi textele curățate în vectori semantici folosind un model de deep learning / Transformer, apoi să antrenezi un classifier care decide dacă o știre este FAKE sau REAL.
+
+Noua variantă folosește DistilBERT pentru Agentul 2, în loc de TF-IDF sau SentenceTransformer simplu.
+
+---
+
+## Arhitectura proiectului
+
+Sistemul are 3 agenți:
+
+1. Agent 1: Rule-based Text Preparation Agent
+   - făcut de cealaltă persoană;
+   - curăță textul;
+   - produce fișierul processed_news.csv.
+
+2. Agent 2: DistilBERT Feature Extraction Agent
+   - făcut de tine;
+   - folosește modelul preantrenat distilbert-base-uncased;
+   - transformă fiecare articol într-un vector numeric semantic.
+
+3. Agent 3: Fake News Classification Agent
+   - făcut de tine;
+   - primește vectorii generați de DistilBERT;
+   - clasifică articolele ca FAKE sau REAL.
+
+Schema:
+
+Raw article
+    ↓
+Agent 1: Rule-based preprocessing
+    ↓
+clean_content
+    ↓
+Agent 2: DistilBERT feature extraction
+    ↓
+BERT feature vectors
+    ↓
+Agent 3: Logistic Regression / MLPClassifier
+    ↓
+Final decision: FAKE / REAL
+
+---
+
+## Structura recomandată de fișiere
+
+În proiect ar trebui să existe:
+
+fake-news-project/
+│
+├── data/
+│   ├── Fake.csv
+│   ├── True.csv
+│   ├── processed_news.csv
+│   └── bert_features/
+│       ├── X_train_bert.npy
+│       ├── X_test_bert.npy
+│       ├── y_train_small.npy
+│       └── y_test_small.npy
+│
+├── notebooks/
+│   ├── 01_data_preprocessing.ipynb
+│   ├── 02_bert_classification.ipynb
+│   └── final_project.ipynb
+│
+├── src/
+│   ├── preprocessing.py
+│   ├── bert_features.py
+│   └── classifier.py
+│
+└── requirements.txt
+
+Tu lucrezi în principal în:
+- notebooks/02_bert_classification.ipynb
+- src/bert_features.py, opțional
+- src/classifier.py, opțional
+
+Dacă nu vreți fișiere .py separate, puteți pune tot codul direct în notebook.
+
+---
+
+# 1. Citirea datelor procesate
+
+## Ce trebuie să faci
+
+Folosește fișierul produs de Agentul 1:
+
+data/processed_news.csv
+
+Acest fișier trebuie să conțină coloanele:
+- content
+- clean_content
+- label
+
+Dacă încă nu există processed_news.csv oficial, poți folosi unul temporar făcut din Fake.csv și True.csv.
+
+## Cod orientativ
+
+Dacă notebook-ul este direct în folderul principal al proiectului:
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data/processed_news.csv")
+
+print(df.head())
+print(df.shape)
+print(df["label"].value_counts())
+```
+
+Dacă notebook-ul este în folderul notebooks/:
+
+```python
+import pandas as pd
+
+df = pd.read_csv("../data/processed_news.csv")
+
+print(df.head())
+print(df.shape)
+print(df["label"].value_counts())
+```
+
+## Verificare
+
+Asigură-te că ai coloanele:
+- content
+- clean_content
+- label
+
+Cod:
+
+```python
+print(df.columns)
+print(df.isnull().sum())
+print(df["label"].value_counts())
+```
+
+---
+
+# 2. Împărțirea train/test
+
+## Ce trebuie să faci
+
+Împarte datele în training și testing.
+
+Important:
+Pentru că DistilBERT poate rula mai greu, pentru început folosim un subset mai mic după split.
+
+## Cod orientativ
+
+```python
+from sklearn.model_selection import train_test_split
+
+X = df["clean_content"]
+y = df["label"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+print("Training set size:", X_train.shape[0])
+print("Testing set size:", X_test.shape[0])
+```
+
+## Verificare distribuție
+
+```python
+print("Train distribution:")
+print(y_train.value_counts())
+
+print("\nTest distribution:")
+print(y_test.value_counts())
+```
+
+## De ce folosim stratify
+
+stratify=y păstrează proporția dintre articolele fake și reale în train și test.
+
+---
+
+# 3. Crearea unui subset pentru rulare rapidă
+
+## De ce facem asta
+
+DistilBERT este un model deep learning bazat pe Transformer. Este mai puternic decât TF-IDF, dar poate rula mai lent.
+
+Pentru laborator, începem cu un subset mic:
+- 1000 articole pentru training
+- 300 articole pentru testing
+
+Dacă merge bine, puteți crește valorile.
+
+## Cod orientativ
+
+```python
+X_train_small = X_train.iloc[:1000]
+y_train_small = y_train.iloc[:1000]
+
+X_test_small = X_test.iloc[:300]
+y_test_small = y_test.iloc[:300]
+
+print("Small train size:", X_train_small.shape[0])
+print("Small test size:", X_test_small.shape[0])
+
+print("Small train distribution:")
+print(y_train_small.value_counts())
+
+print("\nSmall test distribution:")
+print(y_test_small.value_counts())
+```
+
+## Dacă vrei subset mai mare
+
+Poți încerca:
+- 2000 train + 500 test
+- 3000 train + 1000 test
+
+Dar începe cu 1000 + 300 ca să verifici că merge.
+
+---
+
+# 4. Agent 2: DistilBERT Feature Extraction Agent
+
+## Rolul agentului
+
+Agentul 2 transformă fiecare articol într-un vector numeric semantic folosind un model deep learning de tip Transformer.
+
+Model folosit:
+distilbert-base-uncased
+
+Biblioteci:
+- transformers
+- torch
+- numpy
+- tqdm
+
+DistilBERT este o variantă mai mică și mai rapidă de BERT. El capturează contextul cuvintelor și produce reprezentări numerice mai bune decât metodele bazate doar pe frecvența cuvintelor.
+
+---
+
+## Instalare, dacă este nevoie
+
+În notebook:
+
+```python
+!pip install transformers torch tqdm
+```
+
+---
+
+## Importuri
+
+```python
+import torch
+import numpy as np
+from transformers import AutoTokenizer, AutoModel
+from tqdm.auto import tqdm
+```
+
+---
+
+## Încărcarea modelului DistilBERT
+
+```python
+model_name = "distilbert-base-uncased"
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+bert_model = AutoModel.from_pretrained(model_name)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+bert_model.to(device)
+
+bert_model.eval()
+
+print("Using device:", device)
+```
+
+## Explicație
+
+- tokenizer transformă textul în tokeni înțeleși de DistilBERT.
+- bert_model este modelul deep learning preantrenat.
+- device este cuda dacă există placă video compatibilă, altfel cpu.
+- eval() spune modelului că îl folosim pentru inferență, nu pentru antrenare.
+
+---
+
+# 5. Funcția pentru extragerea feature-urilor cu DistilBERT
+
+## Ce trebuie să facă funcția
+
+Funcția primește o listă de texte și returnează un vector pentru fiecare text.
+
+Important:
+Modelele BERT au limită de lungime. Folosim:
+- truncation=True
+- max_length=512
+
+Fiecare articol va fi reprezentat prin vectorul primului token din output-ul DistilBERT.
+
+## Cod orientativ
+
+```python
+def extract_bert_features(texts, batch_size=16, max_length=512):
+    features = []
+
+    texts = list(texts)
+
+    with torch.no_grad():
+        for i in tqdm(range(0, len(texts), batch_size)):
+            batch_texts = texts[i:i + batch_size]
+
+            encoded = tokenizer(
+                batch_texts,
+                padding=True,
+                truncation=True,
+                max_length=max_length,
+                return_tensors="pt"
+            )
+
+            encoded = {
+                key: value.to(device)
+                for key, value in encoded.items()
+            }
+
+            outputs = bert_model(**encoded)
+
+            # Reprezentarea documentului: vectorul primului token
+            batch_features = outputs.last_hidden_state[:, 0, :]
+
+            features.append(batch_features.cpu().numpy())
+
+    return np.vstack(features)
+```
+
+## Ce înseamnă outputs.last_hidden_state[:, 0, :]
+
+DistilBERT produce un vector pentru fiecare token din text.
+Noi luăm vectorul primului token ca reprezentare globală a articolului.
+
+Pentru DistilBERT, dimensiunea vectorului este 768.
+
+---
+
+# 6. Generarea feature-urilor BERT
+
+## Ce trebuie să faci
+
+Rulezi Agentul 2 pe datele de training și test.
+
+## Cod orientativ
+
+```python
+X_train_bert = extract_bert_features(
+    X_train_small,
+    batch_size=16,
+    max_length=512
+)
+
+X_test_bert = extract_bert_features(
+    X_test_small,
+    batch_size=16,
+    max_length=512
+)
+
+print("Train BERT features shape:", X_train_bert.shape)
+print("Test BERT features shape:", X_test_bert.shape)
+```
+
+## Output așteptat
+
+Pentru 1000 train și 300 test:
+
+Train BERT features shape: (1000, 768)
+Test BERT features shape: (300, 768)
+
+Asta înseamnă:
+- 1000 articole de training;
+- fiecare articol este reprezentat printr-un vector cu 768 valori;
+- 300 articole pentru test.
+
+---
+
+# 7. Salvarea feature-urilor BERT
+
+## De ce salvăm
+
+Generarea feature-urilor cu DistilBERT poate dura. Ca să nu refaci acest pas de fiecare dată, salvezi rezultatele în fișiere .npy.
+
+## Cod orientativ
+
+Dacă notebook-ul este direct în folderul principal:
+
+```python
+from pathlib import Path
+
+Path("data/bert_features").mkdir(parents=True, exist_ok=True)
+
+np.save("data/bert_features/X_train_bert.npy", X_train_bert)
+np.save("data/bert_features/X_test_bert.npy", X_test_bert)
+np.save("data/bert_features/y_train_small.npy", y_train_small.to_numpy())
+np.save("data/bert_features/y_test_small.npy", y_test_small.to_numpy())
+
+print("DistilBERT features saved successfully.")
+```
+
+Dacă notebook-ul este în folderul notebooks/:
+
+```python
+from pathlib import Path
+
+Path("../data/bert_features").mkdir(parents=True, exist_ok=True)
+
+np.save("../data/bert_features/X_train_bert.npy", X_train_bert)
+np.save("../data/bert_features/X_test_bert.npy", X_test_bert)
+np.save("../data/bert_features/y_train_small.npy", y_train_small.to_numpy())
+np.save("../data/bert_features/y_test_small.npy", y_test_small.to_numpy())
+
+print("DistilBERT features saved successfully.")
+```
+
+---
+
+## Încărcare ulterioară
+
+Dacă notebook-ul este direct în folderul principal:
+
+```python
+X_train_bert = np.load("data/bert_features/X_train_bert.npy")
+X_test_bert = np.load("data/bert_features/X_test_bert.npy")
+y_train_small = np.load("data/bert_features/y_train_small.npy")
+y_test_small = np.load("data/bert_features/y_test_small.npy")
+```
+
+Dacă notebook-ul este în folderul notebooks/:
+
+```python
+X_train_bert = np.load("../data/bert_features/X_train_bert.npy")
+X_test_bert = np.load("../data/bert_features/X_test_bert.npy")
+y_train_small = np.load("../data/bert_features/y_train_small.npy")
+y_test_small = np.load("../data/bert_features/y_test_small.npy")
+```
+
+---
+
+# 8. Agent 3: Fake News Classification Agent
+
+## Rolul agentului
+
+Agentul 3 primește feature-urile generate de Agentul 2 și clasifică fiecare articol ca:
+- FAKE
+- REAL
+
+Ai două variante bune:
+
+Varianta A:
+Logistic Regression
+- mai ușor;
+- rapid;
+- bun pentru început.
+
+Varianta B:
+MLPClassifier
+- neural network simplu;
+- sună mai mult a deep learning;
+- poate dura puțin mai mult.
+
+Pentru laborator, recomand:
+1. începi cu Logistic Regression;
+2. dacă merge repede, testezi și MLPClassifier ca experiment suplimentar.
+
+---
+
+## Varianta A: Logistic Regression
+
+```python
+from sklearn.linear_model import LogisticRegression
+
+classifier = LogisticRegression(max_iter=1000)
+classifier.fit(X_train_bert, y_train_small)
+
+y_pred = classifier.predict(X_test_bert)
+```
+
+---
+
+## Varianta B: MLPClassifier
+
+```python
+from sklearn.neural_network import MLPClassifier
+
+classifier = MLPClassifier(
+    hidden_layer_sizes=(128, 64),
+    activation="relu",
+    solver="adam",
+    max_iter=30,
+    random_state=42
+)
+
+classifier.fit(X_train_bert, y_train_small)
+
+y_pred = classifier.predict(X_test_bert)
+```
+
+---
+
+# 9. Evaluarea modelului
+
+## Ce trebuie să calculezi
+
+- accuracy;
+- precision;
+- recall;
+- F1-score;
+- confusion matrix;
+- classification report.
+
+## Cod orientativ
+
+```python
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+accuracy = accuracy_score(y_test_small, y_pred)
+
+print("Accuracy:", accuracy)
+
+print("\nClassification report:")
+print(classification_report(y_test_small, y_pred, target_names=["FAKE", "REAL"]))
+
+print("\nConfusion matrix:")
+print(confusion_matrix(y_test_small, y_pred))
+```
+
+---
+
+# 10. Grafic pentru confusion matrix
+
+## Cod orientativ
+
+```python
+import matplotlib.pyplot as plt
+from sklearn.metrics import ConfusionMatrixDisplay
+
+ConfusionMatrixDisplay.from_predictions(
+    y_test_small,
+    y_pred,
+    display_labels=["FAKE", "REAL"]
+)
+
+plt.title("Confusion Matrix - DistilBERT Features + Classifier")
+plt.show()
+```
+
+---
+
+# 11. Funcție finală de predicție
+
+## Ce trebuie să faci
+
+Creează o funcție care primește un text nou și îl trece prin toți agenții:
+
+1. Agent 1: curăță textul cu clean_text()
+2. Agent 2: extrage feature-uri cu DistilBERT
+3. Agent 3: prezice FAKE sau REAL
+
+Ai nevoie de funcția clean_text() de la Persoana 1.
+
+## Cod orientativ
+
+```python
+from src.preprocessing import clean_text
+
+def predict_news(text):
+    # Agent 1
+    cleaned_text = clean_text(text)
+
+    # Agent 2
+    bert_features = extract_bert_features([cleaned_text], batch_size=1)
+
+    # Agent 3
+    prediction = classifier.predict(bert_features)[0]
+
+    if prediction == 1:
+        return "REAL"
+    else:
+        return "FAKE"
+```
+
+## Dacă notebook-ul este în notebooks/
+
+Poate fi nevoie să adaugi folderul proiectului în path:
+
+```python
+import sys
+sys.path.append("..")
+
+from src.preprocessing import clean_text
+```
+
+---
+
+# 12. Testare pe exemple noi
+
+## Ce trebuie să faci
+
+Testează sistemul pe 3-5 exemple scrise manual.
+
+## Cod orientativ
+
+```python
+examples = [
+    "Government officials announced a new education reform after a parliamentary vote.",
+    "Breaking news: aliens have landed in New York and started giving interviews.",
+    "The central bank reported a change in interest rates after the latest meeting.",
+    "A secret miracle pill can cure all diseases overnight, doctors are shocked."
+]
+
+for text in examples:
+    print(text)
+    print("Prediction:", predict_news(text))
+    print()
+```
+
+## Atenție
+
+Modelul nu verifică adevărul real al știrii pe internet. El învață pattern-uri din dataset și prezice pe baza textului și a exemplelor din training.
+
+---
+
+# 13. Opțional: comparație între Logistic Regression și MLP
+
+Dacă ai timp, poți compara două clasificatoare pentru Agentul 3.
+
+## Logistic Regression
+
+```python
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+
+logreg = LogisticRegression(max_iter=1000)
+logreg.fit(X_train_bert, y_train_small)
+
+logreg_pred = logreg.predict(X_test_bert)
+logreg_acc = accuracy_score(y_test_small, logreg_pred)
+
+print("Logistic Regression Accuracy:", logreg_acc)
+```
+
+## MLPClassifier
+
+```python
+from sklearn.neural_network import MLPClassifier
+
+mlp = MLPClassifier(
+    hidden_layer_sizes=(128, 64),
+    activation="relu",
+    solver="adam",
+    max_iter=30,
+    random_state=42
+)
+
+mlp.fit(X_train_bert, y_train_small)
+
+mlp_pred = mlp.predict(X_test_bert)
+mlp_acc = accuracy_score(y_test_small, mlp_pred)
+
+print("MLP Accuracy:", mlp_acc)
+```
+
+## Important
+
+Dacă trebuie strict 3 agenți, MLP-ul poate fi prezentat ca experiment pentru Agentul 3, nu ca un agent separat.
+
+---
+
+# 14. Ce scrii în notebook la explicații
+
+## Pentru Agentul 2
+
+Agentul 2 este un agent bazat pe deep learning, responsabil pentru extragerea reprezentărilor semantice ale articolelor. În loc să folosim TF-IDF, care se bazează pe frecvența cuvintelor, folosim DistilBERT, un model Transformer preantrenat. DistilBERT transformă fiecare articol într-un vector numeric care păstrează informații despre contextul textului. Aceste feature-uri sunt apoi transmise către Agentul 3 pentru clasificare.
+
+## Pentru Agentul 3
+
+Agentul 3 primește vectorii generați de DistilBERT și antrenează un model de clasificare pentru a eticheta articolele ca fake sau real. În prima variantă folosim Logistic Regression, deoarece este simplu, rapid și potrivit pentru clasificare binară. Opțional, putem compara rezultatele cu un MLPClassifier, care este o rețea neurală simplă.
+
+---
+
+# 15. Ce trebuie să predai către echipă
+
+La final trebuie să ai:
+- notebooks/02_bert_classification.ipynb
+- data/bert_features/X_train_bert.npy
+- data/bert_features/X_test_bert.npy
+- data/bert_features/y_train_small.npy
+- data/bert_features/y_test_small.npy
+- metricile de evaluare
+- confusion matrix
+- funcția predict_news()
+- exemple de predicții manuale
+
+Fișierele .npy pot fi mari, deci întrebați laboranta dacă trebuie puse pe Git. De multe ori nu se pun pe Git, ci se regenerează la rulare.
+
+---
+
+# 16. Checklist final pentru Persoana 2
+
+[X] Am citit data/processed_news.csv.
+[ ] Am verificat coloanele clean_content și label.
+[ ] Am făcut train/test split.
+[ ] Am creat subset pentru rulare rapidă.
+[ ] Am instalat/importat transformers și torch.
+[ ] Am încărcat tokenizer-ul DistilBERT.
+[ ] Am încărcat modelul distilbert-base-uncased.
+[ ] Am implementat funcția extract_bert_features().
+[ ] Am generat feature-uri BERT pentru train și test.
+[ ] Am salvat feature-urile BERT, dacă rulează greu.
+[ ] Am antrenat Logistic Regression sau MLPClassifier.
+[ ] Am calculat accuracy.
+[ ] Am afișat classification report.
+[ ] Am afișat confusion matrix.
+[ ] Am făcut funcția predict_news().
+[ ] Am testat 3-5 exemple noi.
+[ ] Am scris explicația pentru Agentul 2.
+[ ] Am scris explicația pentru Agentul 3.
+
+---
+
+# 17. Recomandare pentru laborator
+
+Ca să nu pierzi mult timp, fă în ordinea asta:
+
+1. Citește processed_news.csv.
+2. Fă train/test split.
+3. Fă subset mic: 1000 train + 300 test.
+4. Încarcă DistilBERT.
+5. Generează X_train_bert și X_test_bert.
+6. Salvează feature-urile.
+7. Antrenează Logistic Regression.
+8. Evaluează.
+9. Dacă ai timp, testează și MLPClassifier.
+
+Aceasta este varianta cea mai realistă pentru laborator, deoarece folosește deep learning prin DistilBERT fără să fie nevoie de fine-tuning complet.
